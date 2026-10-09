@@ -18,18 +18,27 @@
   .user[data-u=Rina] { color:var(--rina); } .user[data-u=Jules] { color:var(--jules); }
   .user:focus-visible, .btn:focus-visible { outline:3px solid var(--green); outline-offset:3px; }
 
-  .scroll { position:relative; margin:0 0 26px; border:1px solid var(--line); border-radius:0 18px 18px 0; }
-  .head { display:flex; align-items:center; min-height:34px; padding:0 14px 0 40px; cursor:pointer; font-size:14px; user-select:none; -webkit-user-select:none; }
+  /* Scroll artwork: rolled end on the left, thin white outline, curled paper when open */
+  .scroll { position:relative; height:36px; margin:0 0 26px; }
+  .scroll.open { height:auto; min-height:36px; }
+  .sheet { position:absolute; left:11px; right:18px; top:0; bottom:0; border-top:1px solid #fff; border-bottom:1px solid #fff; }
+  .cap { position:absolute; right:0; top:0; width:18px; height:36px; }
+  .cap path, .roll path, .roll ellipse { stroke:#fff; stroke-width:1; fill:none; }
+  .roll { position:absolute; left:0; width:24px; height:36px; z-index:2; cursor:pointer; }
+  .roll .fl { fill:#000; }
+  .roll.top { top:0; } .roll.bot { bottom:0; display:none; }
+  .edge { position:absolute; left:11px; top:0; width:14px; height:100%; z-index:1; display:none; }
+  .edge .f { fill:#000; stroke:none; }
+  .edge .s { fill:none; stroke:#fff; stroke-width:1; vector-effect:non-scaling-stroke; }
+  .head { position:relative; z-index:3; display:flex; align-items:center; height:36px; padding:0 18px 0 42px; cursor:pointer; font-size:15px; user-select:none; -webkit-user-select:none; }
   .title { min-width:40px; padding:2px 4px; margin-left:-4px; outline:none; cursor:text; user-select:text; -webkit-user-select:text; white-space:pre; }
   .title:empty::before { content:"untitled"; opacity:.55; }
   .title:focus { box-shadow:0 1px 0 rgba(255,255,255,.7); }
-  .sp { position:absolute; left:0; width:24px; height:34px; background:#000; cursor:pointer; }
-  .sp svg { display:block; width:24px; height:34px; stroke:#fff; fill:none; stroke-width:1; }
-  .sp.top { top:-1px; } .sp.bot { display:none; bottom:-1px; }
-  .scroll.open { background:var(--green); border-radius:0 0 46px 0; border-left-color:transparent; margin-bottom:26px; }
-  .scroll.open .sp.bot { display:block; }
-  .scroll.open .sp { background:var(--green); }
-  .body { display:none; padding:6px 34px 34px 46px; min-height:260px; }
+
+  .scroll.open .sheet { right:0; background:var(--green); border-right:1px solid #fff; border-radius:0 0 46px 0; }
+  .scroll.open .cap { display:none; }
+  .scroll.open .edge, .scroll.open .roll.bot { display:block; }
+  .body { display:none; position:relative; z-index:3; padding:6px 34px 34px 50px; min-height:260px; }
   .scroll.open .body { display:block; }
   .p { border-left:3px solid transparent; padding-left:9px; margin-left:-12px; outline:none; white-space:pre-wrap; min-height:1.5em; }
   .p:empty::before { content:"start typing…"; opacity:.55; }
@@ -37,6 +46,7 @@
   body.showRina .p[data-a=Rina] { color:var(--rina); border-left-color:var(--rina); }
   body.showJules .p[data-a=Jules] { color:#1a1acc; border-left-color:#1a1acc; }
   .foot { display:flex; justify-content:space-between; align-items:center; margin-top:12px; padding:0 8px 0 32px; }
+  .btn, .user { font-family:"Pixelify Sans","Courier New",monospace; letter-spacing:.06em; }
   .btn { width:124px; height:34px; border:0; background:#fff; color:var(--green); font-size:15px; cursor:pointer; }
   #status { font-size:13px; opacity:.6; }
 </style>
@@ -70,7 +80,9 @@
   const shared = !!base;
   const LOCAL_KEY = "labyrinth-doc-v2";
   const OPEN_KEY = "labyrinth-open-v1";
-  const spiral = `<svg viewBox="0 0 24 34"><ellipse cx="12" cy="17" rx="10" ry="15"/><path d="M12 17a1.5 1.5 0 0 1 3 0a3.5 3.5 0 0 1-7 0a5.5 5.5 0 0 1 11 0"/></svg>`;
+  const roll = `<svg class="roll ROLLPOS" viewBox="0 0 24 36" aria-hidden="true"><path d="M12 .5H24M12 35.5H24"/><ellipse class="fl" cx="11" cy="18" rx="10" ry="17.3"/><ellipse cx="11" cy="18" rx="6.2" ry="11.5"/><path d="M11 18a1.3 1.3 0 0 1 2.6 0a3.1 3.1 0 0 1-6.2 0a4.2 4.2 0 0 1 8.4 0"/></svg>`;
+  const capSvg = `<svg class="cap" viewBox="0 0 18 36" aria-hidden="true"><path d="M0 .5H2.5Q8.5 .5 10 6.5C11 13 11.3 20 10.8 27.5L6.5 35.5H0"/></svg>`;
+  const edgeSvg = `<svg class="edge" viewBox="0 0 14 100" preserveAspectRatio="none" aria-hidden="true"><path class="f" d="M0 0C2 30 6 70 8 88C9 96 5 99.5 0 100Z"/><path class="s" d="M0 0C2 30 6 70 8 88C9 96 5 99.5 0 100"/></svg>`;
 
   let me = "Jules";
   try { me = sessionStorage.getItem("user") || me; } catch (_) {}
@@ -172,11 +184,11 @@
   function makeSection(sid) {
     const el = document.createElement("section");
     el.className = "scroll";
-    el.innerHTML = `<span class="sp top">${spiral}</span><span class="sp bot">${spiral}</span>
+    el.innerHTML = `<div class="sheet"></div>${capSvg}${edgeSvg}${roll.replace("ROLLPOS","top")}${roll.replace("ROLLPOS","bot")}
       <div class="head px"><span class="title" spellcheck="false"></span></div><div class="body"></div>`;
     const toggle = () => { openMap[sid] = !openMap[sid]; saveOpen(); el.classList.toggle("open", !!openMap[sid]); };
     el.querySelector(".head").onclick = toggle;
-    el.querySelectorAll(".sp").forEach(s => s.onclick = toggle);
+    el.querySelectorAll(".roll").forEach(s => s.onclick = toggle);
 
     const title = el.querySelector(".title");
     makeEditable(title);
