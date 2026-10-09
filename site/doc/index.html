@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hello!?</title>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500&family=Bitter:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root { --green:#4f8b72; --line:#c9c9c9; --rina:#9e005d; --jules:#2b2bff; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:#000; color:#fff; }
+  body { min-height:100vh; padding:16px clamp(12px,2.4vw,36px) 60px; font:400 17px/1.5 "Bitter", Georgia, serif; }
+  .px { font-family:"Pixelify Sans","Courier New",monospace; letter-spacing:.06em; }
+
+  .users { display:flex; justify-content:flex-end; gap:clamp(16px,3.3vw,50px); margin-bottom:28px; }
+  .user { width:124px; height:34px; background:#fff; border:2px solid #fff; font-size:15px; cursor:pointer; }
+  .user.on { background:#000; }
+  .user[data-u=Rina] { color:var(--rina); } .user[data-u=Jules] { color:var(--jules); }
+  .user:focus-visible, .btn:focus-visible { outline:3px solid var(--green); outline-offset:3px; }
+
+  .scroll { position:relative; margin:0 0 26px; border:1px solid var(--line); border-radius:0 18px 18px 0; }
+  .head { display:flex; align-items:center; min-height:34px; padding:0 14px 0 40px; cursor:pointer; font-size:14px; user-select:none; -webkit-user-select:none; }
+  .title { min-width:40px; padding:2px 4px; margin-left:-4px; outline:none; cursor:text; user-select:text; -webkit-user-select:text; white-space:pre; }
+  .title:empty::before { content:"untitled"; opacity:.55; }
+  .title:focus { box-shadow:0 1px 0 rgba(255,255,255,.7); }
+  .sp { position:absolute; left:0; width:24px; height:34px; background:#000; cursor:pointer; }
+  .sp svg { display:block; width:24px; height:34px; stroke:#fff; fill:none; stroke-width:1; }
+  .sp.top { top:-1px; } .sp.bot { display:none; bottom:-1px; }
+  .scroll.open { background:var(--green); border-radius:0 0 46px 0; border-left-color:transparent; margin-bottom:26px; }
+  .scroll.open .sp.bot { display:block; }
+  .scroll.open .sp { background:var(--green); }
+  .body { display:none; padding:6px 34px 34px 46px; min-height:260px; }
+  .scroll.open .body { display:block; }
+  .p { border-left:3px solid transparent; padding-left:9px; margin-left:-12px; outline:none; white-space:pre-wrap; min-height:1.5em; }
+  .p:empty::before { content:"start typing…"; opacity:.55; }
+
+  body.showRina .p[data-a=Rina] { color:var(--rina); border-left-color:var(--rina); }
+  body.showJules .p[data-a=Jules] { color:#1a1acc; border-left-color:#1a1acc; }
+  .foot { display:flex; justify-content:space-between; align-items:center; margin-top:12px; padding:0 8px 0 32px; }
+  .btn { width:124px; height:34px; border:0; background:#fff; color:var(--green); font-size:15px; cursor:pointer; }
+  #status { font-size:13px; opacity:.6; }
+</style>
+</head>
+<body>
+  <div class="users px" id="users">
+    <button class="user" data-u="Rina" aria-pressed="false">Rina</button>
+    <button class="user" data-u="Jules" aria-pressed="false">Jules</button>
+  </div>
+  <main id="doc"></main>
+  <div class="foot px">
+    <button class="btn" id="add">+++ add</button>
+    <span id="status" role="status"></span>
+    <button class="btn" id="close">close</button>
+  </div>
+
+<script>
+  // ─────────────────────────────────────────────────────────────
+  // SHARED SAVING SETUP
+  // Paste your Firebase Realtime Database URL between the quotes, e.g.
+  //   "https://my-project-default-rtdb.firebaseio.com"
+  // Leave it empty to save only on this device (not shared).
+  // ─────────────────────────────────────────────────────────────
+  const DB_URL = "";
+  // ─────────────────────────────────────────────────────────────
+
+  // Cosmetic gate: send people back to the password page if they skipped it.
+  try { if (!sessionStorage.getItem("unlocked")) location.replace("../"); } catch (_) {}
+
+  const base = DB_URL.replace(/\/+$/, "");
+  const shared = !!base;
+  const LOCAL_KEY = "labyrinth-doc-v2";
+  const OPEN_KEY = "labyrinth-open-v1";
+  const spiral = `<svg viewBox="0 0 24 34"><ellipse cx="12" cy="17" rx="10" ry="15"/><path d="M12 17a1.5 1.5 0 0 1 3 0a3.5 3.5 0 0 1-7 0a5.5 5.5 0 0 1 11 0"/></svg>`;
+
+  let me = "Jules";
+  try { me = sessionStorage.getItem("user") || me; } catch (_) {}
+
+  const docEl = document.getElementById("doc");
+  const statusEl = document.getElementById("status");
+  const setStatus = (t) => { statusEl.textContent = t; };
+
+  // ── data model ─────────────────────────────────────────────
+  // doc = { sections: { id: { title, o, paras: { id: { a, t, o } } } } }
+  const seed = () => ({ sections: {
+    s1: { title: "Introduction", o: 1, paras: { p0: { a: me, t: "", o: 1 } } },
+    s2: { title: "Instance I:",  o: 2, paras: { p0: { a: me, t: "", o: 1 } } },
+    s3: { title: "Instance 2",   o: 3, paras: { p0: { a: me, t: "", o: 1 } } }
+  }});
+  let doc = { sections: {} };
+
+  const uid = () => "x" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const sortedIds = (obj) => Object.keys(obj || {}).sort((a, b) => (obj[a].o || 0) - (obj[b].o || 0));
+  const parts = (path) => path.split("/").filter(Boolean);
+  function getPath(root, path) { return parts(path).reduce((o, k) => (o == null ? o : o[k]), root); }
+  function setPath(root, path, val) {
+    const ks = parts(path), last = ks.pop();
+    let o = root;
+    for (const k of ks) { if (o[k] == null || typeof o[k] !== "object") o[k] = {}; o = o[k]; }
+    if (val === null) delete o[last]; else o[last] = val;
+  }
+
+  function normalize(raw) {
+    const d = { sections: {} };
+    const secs = (raw && raw.sections) || {};
+    for (const sid of Object.keys(secs)) {
+      const s = secs[sid] || {};
+      const paras = s.paras && Object.keys(s.paras).length ? s.paras : { p0: { a: me, t: "", o: 1 } };
+      d.sections[sid] = { title: typeof s.title === "string" ? s.title : "", o: s.o || 0, paras };
+    }
+    return d;
+  }
+
+  // ── storage: Firebase REST (shared) or localStorage (this device) ──
+  async function api(method, path, body) {
+    const r = await fetch(`${base}/doc${path}.json`, {
+      method, cache: "no-store", body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  }
+  const saveLocal = () => { try { localStorage.setItem(LOCAL_KEY, JSON.stringify(doc)); } catch (_) {} };
+
+  let inflight = 0;
+  const timers = {};
+  const busy = () => inflight > 0 || Object.keys(timers).length > 0;
+
+  function flush(path, val) {
+    if (!shared) { saveLocal(); setStatus("saved on this device only"); return; }
+    inflight++; setStatus("saving…");
+    api(val === null ? "DELETE" : "PUT", path, val)
+      .then(() => setStatus("saved"))
+      .catch(() => { setStatus("offline, retrying…"); setTimeout(() => flush(path, getPath(doc, path) ?? null), 3000); })
+      .finally(() => { inflight--; });
+  }
+  function schedule(path) {            // debounced write of whatever is at `path` now
+    clearTimeout(timers[path]);
+    setStatus(shared ? "saving…" : "");
+    timers[path] = setTimeout(() => {
+      delete timers[path];
+      const v = getPath(doc, path);
+      if (v !== undefined) flush(path, v);
+    }, 400);
+  }
+  function commit(path, val) {         // immediate write
+    clearTimeout(timers[path]); delete timers[path];
+    setPath(doc, path, val);
+    flush(path, val);
+  }
+
+  // ── open/closed state is personal (not shared) ─────────────
+  let openMap = { s2: true };
+  try { openMap = JSON.parse(localStorage.getItem(OPEN_KEY)) || openMap; } catch (_) {}
+  const saveOpen = () => { try { localStorage.setItem(OPEN_KEY, JSON.stringify(openMap)); } catch (_) {} };
+
+  // ── helpers for editable elements ──────────────────────────
+  function makeEditable(el) {
+    el.contentEditable = "plaintext-only";
+    if (el.contentEditable !== "plaintext-only") el.contentEditable = "true";
+    el.onpaste = (e) => {
+      e.preventDefault();
+      document.execCommand("insertText", false, (e.clipboardData || window.clipboardData).getData("text/plain"));
+    };
+  }
+  function focusEnd(el) {
+    el.focus();
+    const sel = getSelection(); sel.selectAllChildren(el); sel.collapseToEnd();
+  }
+
+  // ── DOM building / reconciling ─────────────────────────────
+  const secEls = {};
+
+  function makeSection(sid) {
+    const el = document.createElement("section");
+    el.className = "scroll";
+    el.innerHTML = `<span class="sp top">${spiral}</span><span class="sp bot">${spiral}</span>
+      <div class="head px"><span class="title" spellcheck="false"></span></div><div class="body"></div>`;
+    const toggle = () => { openMap[sid] = !openMap[sid]; saveOpen(); el.classList.toggle("open", !!openMap[sid]); };
+    el.querySelector(".head").onclick = toggle;
+    el.querySelectorAll(".sp").forEach(s => s.onclick = toggle);
+
+    const title = el.querySelector(".title");
+    makeEditable(title);
+    title.onclick = (e) => e.stopPropagation();
+    title.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); title.blur(); } };
+    title.oninput = () => {
+      const s = doc.sections[sid]; if (!s) return;
+      s.title = title.textContent;
+      schedule(`/sections/${sid}/title`);
+    };
+    el._paras = {};
+    secEls[sid] = el;
+    return el;
+  }
+
+  function makeParagraph(sid, pid) {
+    const d = document.createElement("div");
+    d.className = "p";
+    makeEditable(d);
+    d.oninput = () => {
+      const s = doc.sections[sid]; if (!s) return;
+      const p = s.paras[pid] || (s.paras[pid] = { o: 1 });
+      p.t = d.textContent; p.a = me; d.dataset.a = me;
+      schedule(`/sections/${sid}/paras/${pid}`);
+    };
+    d.onkeydown = (e) => {
+      const s = doc.sections[sid]; if (!s) return;
+      const ids = sortedIds(s.paras), i = ids.indexOf(pid);
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const here = s.paras[pid].o || 0;
+        const next = i + 1 < ids.length ? s.paras[ids[i + 1]].o : here + 2;
+        const nid = uid();
+        commit(`/sections/${sid}/paras/${nid}`, { a: me, t: "", o: (here + next) / 2 });
+        sync(); focusEnd(secEls[sid]._paras[nid]);
+      } else if (e.key === "Backspace" && !d.textContent && ids.length > 1) {
+        e.preventDefault();
+        commit(`/sections/${sid}/paras/${pid}`, null);
+        sync(); focusEnd(secEls[sid]._paras[i > 0 ? ids[i - 1] : ids[1]]);
+      }
+    };
+    return d;
+  }
+
+  function sync() {
+    const sids = sortedIds(doc.sections);
+    for (const sid of Object.keys(secEls)) {
+      if (!doc.sections[sid]) { secEls[sid].remove(); delete secEls[sid]; }
+    }
+    sids.forEach((sid, i) => {
+      const s = doc.sections[sid];
+      const el = secEls[sid] || makeSection(sid);
+      if (docEl.children[i] !== el) docEl.insertBefore(el, docEl.children[i] || null);
+      el.classList.toggle("open", !!openMap[sid]);
+
+      const title = el.querySelector(".title");
+      if (document.activeElement !== title && title.textContent !== s.title) title.textContent = s.title;
+
+      const body = el.querySelector(".body");
+      for (const pid of Object.keys(el._paras)) {
+        if (!s.paras[pid]) { el._paras[pid].remove(); delete el._paras[pid]; }
+      }
+      sortedIds(s.paras).forEach((pid, j) => {
+        const p = s.paras[pid];
+        const pe = el._paras[pid] || (el._paras[pid] = makeParagraph(sid, pid));
+        if (body.children[j] !== pe) body.insertBefore(pe, body.children[j] || null);
+        pe.dataset.a = p.a || "";
+        if (document.activeElement !== pe && pe.textContent !== (p.t || "")) pe.textContent = p.t || "";
+      });
+    });
+  }
+
+  // ── loading and polling ────────────────────────────────────
+  let lastRemote = "";
+  async function pull(first) {
+    if (!shared) return;
+    if (!first && (document.hidden || busy())) return;
+    try {
+      const raw = await api("GET", "");
+      if (busy()) return;                       // user started typing mid-request
+      if (raw == null) {                         // empty database: plant the starter document
+        doc = seed();
+        await api("PUT", "", doc);
+        lastRemote = ""; sync(); setStatus("saved"); return;
+      }
+      const s = JSON.stringify(raw);
+      if (s !== lastRemote) { lastRemote = s; doc = normalize(raw); sync(); }
+      if (!inflight) setStatus("synced");
+    } catch (_) {
+      setStatus("can't reach the shared document");
+    }
+  }
+
+  async function start() {
+    if (!shared) {
+      let raw = null;
+      try { raw = JSON.parse(localStorage.getItem(LOCAL_KEY)); } catch (_) {}
+      doc = raw ? normalize(raw) : seed();
+      sync();
+      setStatus("saved on this device only");
+      return;
+    }
+    setStatus("loading…");
+    await pull(true);
+    setInterval(pull, 3000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) pull(); });
+    window.addEventListener("focus", () => pull());
+  }
+
+  // ── buttons ────────────────────────────────────────────────
+  // Rina / Jules toggle highlighting of that person's writing.
+  document.querySelectorAll(".user").forEach(b => b.onclick = () => {
+    const on = document.body.classList.toggle("show" + b.dataset.u);
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on);
+  });
+
+  document.getElementById("add").onclick = () => {
+    const sid = uid();
+    const max = Math.max(0, ...Object.values(doc.sections).map(s => s.o || 0));
+    commit(`/sections/${sid}`, { title: "Untitled", o: max + 1, paras: { p0: { a: me, t: "", o: 1 } } });
+    openMap[sid] = true; saveOpen();
+    sync();
+    const t = secEls[sid].querySelector(".title");
+    t.focus(); getSelection().selectAllChildren(t);
+    secEls[sid].scrollIntoView({ block: "center", behavior: "smooth" });
+  };
+
+  document.getElementById("close").onclick = () => {
+    try { sessionStorage.removeItem("unlocked"); sessionStorage.removeItem("user"); } catch (_) {}
+    location.href = "../";
+  };
+
+  start();
+</script>
+</body>
+</html>
